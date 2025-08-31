@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RINGFLIP — one‑button circular runner</title>
+  <style>
+    :root {
+      --bg1: #0f1226;
+      --bg2: #1b1f3b;
+      --fg: #e8eaf6;
+      --accent: #7c4dff;
+      --good: #00e676;
+      --bad: #ff5252;
+      --muted: #9aa0b4;
+      --shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    [data-theme="light"]{
+      --bg1:#f7f8ff; --bg2:#e9ebff; --fg:#1b1f3b; --accent:#5e35b1; --good:#00c853; --bad:#e53935; --muted:#56606f;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px circle at 20% 10%, var(--bg2), var(--bg1) 50%);
+      color: var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    .wrap {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      place-items: center;
+      height: 100%;
+      gap: 8px;
+    }
+    header {
+      display: flex; align-items: center; gap: 12px; padding: 12px 16px; width: min(1100px, 92vw);
+    }
+    header .logo {
+      font-weight: 800; letter-spacing: .6px; font-size: clamp(18px, 2vw, 22px);
+      padding: 6px 12px; border-radius: 999px; background: linear-gradient(135deg, var(--accent), transparent 60%);
+      box-shadow: var(--shadow);
+    }
+    .hud {
+      display: flex; gap: 14px; margin-left: auto; align-items: center;
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px; padding: 6px 10px; box-shadow: var(--shadow);
+    }
+    .hud > div { opacity: .9; font-weight: 600; }
+    .btn, button {
+      appearance: none; border: 0; background: linear-gradient(180deg, var(--accent), #3d2a8a);
+      color: white; padding: 10px 14px; border-radius: 12px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow);
+      transition: transform .06s ease;
+    }
+    .btn:active { transform: translateY(1px) scale(.98); }
+
+    .stage {
+      position: relative; width: min(1100px, 92vw); aspect-ratio: 16/10;
+      border-radius: 20px; overflow: hidden;
+      background: radial-gradient(900px circle at 70% 20%, rgba(255,255,255,.06), rgba(0,0,0,.05) 60%),
+                  linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.08));
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: var(--shadow);
+      touch-action: manipulation;
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+
+    .overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+    .panel { pointer-events: auto; 
+      background: rgba(18, 20, 38, .72);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 18px 20px; border-radius: 16px; width: min(560px, 90%);
+      box-shadow: var(--shadow);
+    }
+    .panel h1 { margin: 0 0 8px; font-size: clamp(24px, 3vw, 34px); letter-spacing: 0.4px; }
+    .panel p { margin: 8px 0; line-height: 1.5; color: var(--muted); }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+    .switch { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); padding: 6px 10px; border-radius: 999px; }
+    .switch input { appearance: none; width: 36px; height: 20px; border-radius: 999px; background: #444b6a; position: relative; outline: none; cursor: pointer; }
+    .switch input:checked { background: #2e7d32; }
+    .switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: left .18s ease; }
+    .switch input:checked::after { left: 18px; }
+
+    footer { width: min(1100px, 92vw); display: flex; justify-content: space-between; align-items: center; padding: 6px 4px 14px; opacity: .75; font-size: 13px; }
+    a, a:visited { color: var(--fg); text-decoration-color: rgba(124,77,255,.5); text-underline-offset: 2px; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }
+    .pill { padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,.12); opacity: .8; }
+
+    @media (max-width: 700px){
+      .panel { padding: 14px; }
+      .hud { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="root" data-theme="dark">
+    <header>
+      <div class="logo">RINGFLIP</div>
+      <div class="hud">
+        <div>Score: <span id="score">0</span></div>
+        <div>Best: <span id="best">0</span></div>
+        <button id="pauseBtn" class="btn" aria-label="Pause/Resume (P)">⏸</button>
+      </div>
+    </header>
+
+    <div class="stage" id="stage" aria-label="Game stage">
+      <canvas id="game"></canvas>
+      <!-- Start / GameOver overlay -->
+      <div id="overlay" class="overlay" hidden>
+        <div class="panel" id="panel">
+          <h1 id="panelTitle">RINGFLIP</h1>
+          <p id="panelBody">Tap / Click / Press <span class="kbd">Space</span> to <b>flip</b> inside or outside the ring. Avoid spikes when you pass them. One button, pure flow.</p>
+          <div class="row" style="margin:10px 0 14px">
+            <button class="btn" id="playBtn">▶ Play</button>
+            <span class="pill">or press <span class="kbd">Space</span></span>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <label class="switch">Sound
+              <input id="soundToggle" type="checkbox" checked>
+            </label>
+            <label class="switch">Zen (no death)
+              <input id="zenToggle" type="checkbox">
+            </label>
+            <label class="switch">Light theme
+              <input id="themeToggle" type="checkbox">
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div>Controls: <span class="kbd">Space</span> / Click to flip • <span class="kbd">P</span> Pause • <span class="kbd">R</span> Restart</div>
+      <div>Made for you — fast, minimal, addictive.</div>
+    </footer>
+  </div>
+
+<script>
+(() => {
+  const root = document.getElementById('root');
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const panel = document.getElementById('panel');
+  const playBtn = document.getElementById('playBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const soundToggle = document.getElementById('soundToggle');
+  const zenToggle = document.getElementById('zenToggle');
+  const themeToggle = document.getElementById('themeToggle');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const panelTitle = document.getElementById('panelTitle');
+  const panelBody = document.getElementById('panelBody');
+
+  // Layout
+  function fitCanvas(){
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(fitCanvas).observe(canvas.parentElement);
+  fitCanvas();
+
+  // Audio (simple beeps)
+  let ac = null; let muted = false;
+  function ensureAC(){ if(!ac){ try{ ac = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }
+  function beep(freq=600, dur=0.06, gain=0.06){
+    if(muted || !ac) return;
+    const t = ac.currentTime;
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.frequency.value = freq; o.type='sine';
+    g.gain.value = gain; g.gain.setTargetAtTime(0, t+dur, 0.04);
+    o.connect(g).connect(ac.destination);
+    o.start(); o.stop(t + dur + 0.1);
+  }
+
+  // Helpers
+  const TAU = Math.PI * 2;
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const rand = (a,b)=>a + Math.random()*(b-a);
+  const nowMs = ()=> performance.now();
+
+  // Game state
+  const state = {
+    running:false, paused:false, zen:false,
+    score:0, best: Number(localStorage.getItem('ringflip_best')||0),
+    angle:0, side:1, // side: 1 = outside, -1 = inside
+    speed: 1.5, // rotations per 10 seconds base (scaled later)
+    radius:0,
+    obstacles:[],
+    particles:[],
+    lastSpawn:0,
+    spawnEvery:1200, // ms
+    startTime:0,
+  };
+  bestEl.textContent = state.best;
+
+  // Input
+  function flip(){
+    if(!state.running){ startGame(); return; }
+    if(state.paused) return;
+    state.side *= -1;
+    addFlipBurst();
+    navigator.vibrate && navigator.vibrate(8);
+    beep(880, 0.05, 0.05);
+  }
+  function togglePause(){ if(!state.running) return; state.paused = !state.paused; pauseBtn.textContent = state.paused? '▶' : '⏸'; }
+  function restart(){ showMenu(); }
+
+  window.addEventListener('keydown',(e)=>{
+    if(e.code==='Space'){ e.preventDefault(); flip(); }
+    else if(e.key==='p' || e.key==='P'){ togglePause(); }
+    else if(e.key==='r' || e.key==='R'){ restart(); }
+  });
+  canvas.addEventListener('pointerdown', flip);
+  playBtn.addEventListener('click', ()=>{ flip(); });
+  pauseBtn.addEventListener('click', ()=>{ togglePause(); });
+  soundToggle.addEventListener('change', ()=>{ muted = !soundToggle.checked; if(!muted){ ensureAC(); beep(720,0.08,0.06);} });
+  themeToggle.addEventListener('change', ()=>{ root.setAttribute('data-theme', themeToggle.checked? 'light':'dark'); });
+  zenToggle.addEventListener('change', ()=>{ state.zen = zenToggle.checked; });
+
+  // Particles
+  function addFlipBurst(){
+    const n = 20; const r = state.radius; const cx = canvas.width/ (window.devicePixelRatio||1) /2; const cy = canvas.height/ (window.devicePixelRatio||1) /2;
+    const a = state.angle * TAU;
+    const x = cx + Math.cos(a) * r * 1.0;
+    const y = cy + Math.sin(a) * r * 1.0;
+    for(let i=0;i<n;i++){
+      state.particles.push({x,y, vx: rand(-2,2), vy: rand(-2,2), life: rand(300,600)});
+    }
+  }
+
+  function addPassSpark(x,y){
+    for(let i=0;i<6;i++) state.particles.push({x,y,vx:rand(-1.2,1.2),vy:rand(-1.2,1.2),life:rand(160,300)});
+  }
+
+  // Obstacles
+  function spawnObstacle(){
+    const angle = Math.random();
+    const side = Math.random()<0.5? 1 : -1; // 1 outside, -1 inside
+    const size = rand(12, 20);
+    state.obstacles.push({angle, side, size, passed:false});
+  }
+
+  // Drawing
+  function draw(){
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0,0,w,h);
+
+    const cx = w/2, cy = h/2;
+    const base = Math.min(w,h)*0.34;
+    state.radius = base;
+
+    // Ring (single stroke)
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath(); ctx.arc(cx, cy, base, 0, TAU); ctx.stroke();
+
+    // Obstacles (spikes attached to the ring)
+    for(const ob of state.obstacles){
+      const ang = ob.angle * TAU;
+      const dirx = Math.cos(ang), diry = Math.sin(ang);
+      const px = cx + dirx*base;
+      const py = cy + diry*base;
+      const len = 24;
+      const ox = px + dirx * (ob.side===1? +6 : -6);
+      const oy = py + diry * (ob.side===1? +6 : -6);
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(ox + dirx * (ob.side===1? +len : -len), oy + diry * (ob.side===1? +len : -len));
+      ctx.strokeStyle = ob.passed? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      // tip
+      ctx.beginPath();
+      ctx.arc(ox + dirx * (ob.side===1? +len : -len), oy + diry * (ob.side===1? +len : -len), 3.5, 0, TAU);
+      ctx.fillStyle = ob.passed? 'rgba(255,255,255,0.12)' : (ob.side===1? '#ffd54f':'#4fc3f7');
+      ctx.fill();
+    }
+
+    // Player (stick head + small body) — always on ring, flips inside/outside for clearance
+    const a = state.angle * TAU;
+    const px = cx + Math.cos(a) * base;
+    const py = cy + Math.sin(a) * base;
+
+    // body direction (normal to ring)
+    const nx = Math.cos(a), ny = Math.sin(a);
+
+    // tiny body line (points inside or outside by side)
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + nx * 14 * state.side, py + ny * 14 * state.side);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'white';
+    ctx.stroke();
+
+    // head
+    ctx.beginPath();
+    ctx.arc(px + nx * 18 * state.side, py + ny * 18 * state.side, 6.5, 0, TAU);
+    ctx.fillStyle = '#ffd54f';
+    ctx.fill();
+
+    // particles
+    for(const p of state.particles){
+      ctx.globalAlpha = clamp(p.life/300, 0, 1);
+      ctx.fillStyle = 'white';
+      ctx.fillRect(p.x, p.y, 2, 2);
+      ctx.globalAlpha = 1;
+    }
+
+    // HUD (center faint text)
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 120px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(state.score), cx, cy+40);
+    ctx.restore();
+  }
+
+  // Update
+  let prev = nowMs();
+  function update(dt){
+    if(state.paused || !state.running) return;
+
+    // speed scales with time for difficulty
+    const t = (nowMs() - state.startTime)/1000;
+    const rpm = 0.6 + t*0.05; // rotations per second over time (gentle ramp)
+    state.angle = (state.angle + rpm*dt) % 1;
+
+    // spawn logic
+    state.spawnEvery = clamp(1200 - t*10, 420, 1200);
+    state.lastSpawn += dt*1000;
+    if(state.lastSpawn >= state.spawnEvery){ state.lastSpawn = 0; spawnObstacle(); }
+
+    // check passes / collisions
+    const passThreshold = 0.02; // ~7 deg
+    const cx = canvas.clientWidth/2, cy = canvas.clientHeight/2;
+    const base = Math.min(canvas.clientWidth, canvas.clientHeight)*0.34;
+    const a = state.angle * TAU;
+    const px = cx + Math.cos(a) * base;
+    const py = cy + Math.sin(a) * base;
+
+    for(const ob of state.obstacles){
+      if(ob.passed) continue;
+      let d = Math.abs((state.angle - ob.angle + 1) % 1);
+      d = Math.min(d, 1 - d);
+      if(d < passThreshold){
+        // near the spike at crossing time
+        const ang = ob.angle * TAU;
+        const tipx = cx + Math.cos(ang) * (base + (ob.side===1? +24 : -24));
+        const tipy = cy + Math.sin(ang) * (base + (ob.side===1? +24 : -24));
+        addPassSpark(tipx, tipy);
+        if(state.side === ob.side){
+          // hit
+          if(state.zen){
+            state.score -= 10; ob.passed = true; beep(200,0.09,0.05);
+          } else {
+            gameOver();
+            return;
+          }
+        } else {
+          state.score += 5; ob.passed = true; beep(760,0.05,0.04);
+        }
+        scoreEl.textContent = state.score;
+      }
+    }
+
+    // Cull old obstacles and particles
+    if(state.obstacles.length > 60) state.obstacles = state.obstacles.slice(-40);
+    for(let i=state.particles.length-1;i>=0;i--){
+      const p = state.particles[i]; p.x += p.vx; p.y += p.vy; p.life -= 16;
+      if(p.life<=0) state.particles.splice(i,1);
+    }
+  }
+
+  function loop(){
+    const t = nowMs();
+    const dt = Math.min(0.033, (t - prev)/1000); // cap dt
+    prev = t;
+    if(state.running && !state.paused) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // UI / Flow
+  function showMenu(){
+    state.running = false; state.paused = false; pauseBtn.textContent = '⏸';
+    overlay.hidden = false; panel.hidden = false;
+    panelTitle.textContent = 'RINGFLIP';
+    const tip = 'Tap / Click / Space to flip sides. Pass spikes while being on the opposite side. +5 for safe pass. Hit ends run.';
+    panelBody.innerHTML = tip;
+  }
+
+  function startGame(){
+    ensureAC(); muted = !soundToggle.checked; state.zen = zenToggle.checked; root.setAttribute('data-theme', themeToggle.checked? 'light':'dark');
+    overlay.hidden = true; panel.hidden = true;
+    state.running = true; state.paused = false; pauseBtn.textContent = '⏸';
+    state.score = 0; scoreEl.textContent = '0';
+    state.angle = 0; state.side = 1; state.obstacles.length = 0; state.particles.length = 0;
+    state.lastSpawn = 999; state.startTime = nowMs();
+  }
+
+  function gameOver(){
+    state.running = false;
+    beep(140,0.15,0.09);
+    const newBest = Math.max(state.best, state.score);
+    if(newBest !== state.best){
+      state.best = newBest; localStorage.setItem('ringflip_best', String(newBest));
+      bestEl.textContent = newBest;
+    }
+    overlay.hidden = false; panel.hidden = false;
+    panelTitle.textContent = 'Game Over';
+    panelBody.innerHTML = `Score: <b>${state.score}</b><br>Best: <b>${state.best}</b><br><span style="color:var(--muted)">Press <span class="kbd">R</span> to restart or <span class="kbd">Space</span> to jump back in.</span>`;
+  }
+
+  // start on menu
+  showMenu();
+})();
+</script>
+</body>
+</html>
